@@ -3,7 +3,7 @@ name: Compiler WASM et déployer
 on:
   push:
     branches: [main]
-  workflow_dispatch: # bouton manuel dans l'onglet Actions
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,17 +15,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Récupère le code
       - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Installe Emscripten
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
           version: latest
 
-      # 3. Compile cubiomes → WASM
+      - name: Clone cubiomes
+        run: git clone --depth=1 https://github.com/Cubitect/cubiomes build/cubiomes
+
       - name: Compiler cubiomes
         run: |
           cd build
@@ -40,7 +40,7 @@ jobs:
             cubiomes/quadbase.c \
             cubiomes/util.c \
             -I cubiomes \
-            -o ../mineguide-v5/assets/js/cubiomes.js \
+            -o ../assets/js/cubiomes.js \
             -s WASM=1 \
             -s EXPORTED_FUNCTIONS='["_malloc","_free","_cw_init","_cw_free","_cw_set_seed","_cw_get_biome_bulk","_cw_get_structures"]' \
             -s EXPORTED_RUNTIME_METHODS='["HEAP32"]' \
@@ -54,16 +54,13 @@ jobs:
             -O2 \
             --no-entry
 
-      # 4. Configure GitHub Pages
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
-      # 5. Upload le site (avec le WASM généré)
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: mineguide-v5
+          path: .
 
-      # 6. Déploie sur GitHub Pages
       - name: Deploy
         uses: actions/deploy-pages@v4
