@@ -1,0 +1,69 @@
+name: Compiler WASM et déployer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: # bouton manuel dans l'onglet Actions
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Récupère le code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Installe Emscripten
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      # 3. Compile cubiomes → WASM
+      - name: Compiler cubiomes
+        run: |
+          cd build
+          emcc \
+            cubiomes_wrapper.c \
+            cubiomes/biomenoise.c \
+            cubiomes/biomes.c \
+            cubiomes/finders.c \
+            cubiomes/generator.c \
+            cubiomes/layers.c \
+            cubiomes/noise.c \
+            cubiomes/quadbase.c \
+            cubiomes/util.c \
+            -I cubiomes \
+            -o ../mineguide-v5/assets/js/cubiomes.js \
+            -s WASM=1 \
+            -s EXPORTED_FUNCTIONS='["_malloc","_free","_cw_init","_cw_free","_cw_set_seed","_cw_get_biome_bulk","_cw_get_structures"]' \
+            -s EXPORTED_RUNTIME_METHODS='["HEAP32"]' \
+            -s ALLOW_MEMORY_GROWTH=1 \
+            -s INITIAL_MEMORY=33554432 \
+            -s MAXIMUM_MEMORY=536870912 \
+            -s MODULARIZE=1 \
+            -s EXPORT_NAME="CubiomesModule" \
+            -s ENVIRONMENT=worker \
+            -s NO_EXIT_RUNTIME=1 \
+            -O2 \
+            --no-entry
+
+      # 4. Configure GitHub Pages
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      # 5. Upload le site (avec le WASM généré)
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: mineguide-v5
+
+      # 6. Déploie sur GitHub Pages
+      - name: Deploy
+        uses: actions/deploy-pages@v4
