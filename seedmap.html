@@ -457,12 +457,14 @@ var _workerURL  = URL.createObjectURL(_workerBlob);
 /* ── État ── */
 var seed=0, version='1.21.4', zoom=4, camX=0, camZ=0, showGrid=false;
 var dragging=false, lastMX=0, lastMY=0, raf=null;
-var worker=null, workerReady=false;
-var tileCache=new Map();     // clé → Uint8ClampedArray
-var tileQueue=[];            // requêtes en attente
-var inFlight=new Map();      // id → clé
-var inFlightCount=0, nextId=0;
-var MAX_INFLIGHT=6;
+var POOL_SIZE=4;
+var workers=[];
+var workerReady=false;
+var tileCache=new Map();
+var tileQueue=[];
+var inFlight=new Map();
+var inFlightCount=0, nextId=0, nextWorker=0;
+var MAX_INFLIGHT=16;
 var structData={}, visStructs=new Set();
 const TILE=64;
 const _oc=document.createElement('canvas'); _oc.width=_oc.height=TILE;
@@ -518,11 +520,15 @@ function init(){
 
 /* ── Worker ── */
 function spawnWorker(){
-  if(worker) worker.terminate();
-  worker=new Worker(_workerURL);
-  worker.onmessage=onWorkerMsg;
-  worker.onerror=function(e){console.error('Worker error:',e);};
+  workers.forEach(function(w){w.terminate();});
+  workers=[];
   workerReady=false;
+  for(var i=0;i<POOL_SIZE;i++){
+    var w=new Worker(_workerURL);
+    w.onmessage=onWorkerMsg;
+    w.onerror=function(e){console.error('Worker error:',e);};
+    workers.push(w);
+  }
 }
 
 function onWorkerMsg(e){
@@ -567,12 +573,17 @@ function loadMap(){
   });
   document.getElementById('rs').style.display='flex';
   spawnWorker();
-  // Wait for worker to be ready then send init
-  worker.onmessage=function(e){
-    if(e.data.type==='tile'){ onWorkerMsg(e); return; }
-    if(e.data.type==='ready'){ onWorkerMsg(e); return; }
-  };
-  worker.postMessage({type:'init', seed:seed, version:version});
+  var readyCount=0;
+  workers.forEach(function(w){
+    w.onmessage=function(e){
+      if(e.data.type==='tile'){ onWorkerMsg(e); return; }
+      if(e.data.type==='ready'){
+        readyCount++;
+        if(readyCount===1) onWorkerMsg(e);  // handle structs once
+      }
+    };
+    w.postMessage({type:'init', seed:seed, version:version});
+  });
   history.replaceState(null,'','?seed='+encodeURIComponent(raw)+'&v='+version);
 }
 
@@ -587,9 +598,10 @@ function pumpQueue(){
     var req=tileQueue.shift();
     if(tileCache.has(req.key)) continue;
     var id=nextId++;
+    var wi=nextWorker%POOL_SIZE; nextWorker++;
     inFlight.set(id,req.key);
     inFlightCount++;
-    worker.postMessage({type:'tile',id:id,tileX:req.tileX,tileZ:req.tileZ,tileSz:req.tileSz,px:TILE});
+    workers[wi].postMessage({type:'tile',id:id,tileX:req.tileX,tileZ:req.tileZ,tileSz:req.tileSz,px:TILE});
   }
 }
 
@@ -642,7 +654,7 @@ function render(){
       }
       var imgd=new ImageData(rgba.slice(),TILE,TILE);
       _octx.putImageData(imgd,0,0);
-      var p=w2s(tx*tb,tz*tb),sz=Math.ceil(TILE*tb/zoom);
+      var p=w2s(tx*tb,tz*tb),sz=Math.round(tb/zoom);
       ctx.drawImage(_oc,Math.round(p.x),Math.round(p.y),sz,sz);
     }
   }
